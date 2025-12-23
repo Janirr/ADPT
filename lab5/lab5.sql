@@ -1,0 +1,114 @@
+-- Zadanie 1 A
+INSERT INTO USER_SDO_GEOM_METADATA VALUES (
+  'FIGURY',
+  'KSZTALT',
+  MDSYS.SDO_DIM_ARRAY(
+    MDSYS.SDO_DIM_ELEMENT('X', 0, 10, 0.01),
+    MDSYS.SDO_DIM_ELEMENT('Y', 0, 10, 0.01)
+  ),
+  NULL -- SRID musi być NULL, ponieważ w danych wejściowych wstawiono NULL
+);
+
+-- Zadanie 1 B
+SELECT SDO_TUNE.ESTIMATE_RTREE_INDEX_SIZE(3000000, 8192, 10, 2, 0) 
+FROM DUAL;
+
+-- Zadanie 1 C
+DROP INDEX figury_spatial_idx;
+
+CREATE INDEX figury_spatial_idx
+ON FIGURY(KSZTALT)
+INDEXTYPE IS MDSYS.SPATIAL_INDEX_V2;
+
+-- Zadanie 1 D
+SELECT ID
+FROM FIGURY
+WHERE SDO_FILTER(KSZTALT,
+  SDO_GEOMETRY(2001, NULL, SDO_POINT_TYPE(3,3,NULL), NULL, NULL)
+) = 'TRUE';
+-- Ja dostałem wynik ID: 1, 2. Wtedy odpowiada rzeczywistości. Ale w prezentacji jest wynik ID 1, 2, 3
+-- (ID: 1, 2, 3) nie odpowiada w pełni "rzeczywistości" w sensie dokładnego geometrycznego stykania się lub przecinania obiektów z punktem (3,3). Wizualnie punkt (3,3) może nie leżeć na linii kształtu nr 3 ani wewnątrz koła nr 1, a mimo to te identyfikatory są zwracane.
+
+-- Zadanie 1 E
+SELECT ID
+FROM FIGURY
+WHERE SDO_RELATE(KSZTALT,
+  SDO_GEOMETRY(2001, NULL, SDO_POINT_TYPE(3,3,NULL), NULL, NULL),
+  'mask=ANYINTERACT'
+) = 'TRUE';
+-- Tak, ten wynik odpowiada rzeczywistości geometrycznej. Jedyną figurą, która fizycznie zawiera punkt (3,3), jest kwadrat (ID 2).
+
+-- Zadanie 2 A
+SELECT A.CITY_NAME AS MIASTO, SDO_NN_DISTANCE(1) AS ODL
+FROM MAJOR_CITIES A
+WHERE SDO_NN(
+    A.GEOM, 
+    (SELECT GEOM FROM MAJOR_CITIES WHERE CITY_NAME = 'Warsaw'),
+    'sdo_num_res=10 unit=km', -- Pobieramy 10, aby uwzględnić Warszawę i ją odrzucić
+    1
+) = 'TRUE' 
+AND A.CITY_NAME != 'Warsaw';
+
+-- Zadanie 2 B
+SELECT CITY_NAME AS MIASTO
+FROM MAJOR_CITIES
+WHERE SDO_WITHIN_DISTANCE(
+    GEOM,
+    (SELECT GEOM FROM MAJOR_CITIES WHERE CITY_NAME = 'Warsaw'),
+    'distance=100 unit=km'
+) = 'TRUE'
+AND CITY_NAME != 'Warsaw';
+
+-- Zadanie 2 C
+SELECT B.CNTRY_NAME AS KRAJ, A.CITY_NAME AS MIASTO
+FROM MAJOR_CITIES A, COUNTRY_BOUNDARIES B
+WHERE B.CNTRY_NAME = 'Slovakia'
+AND SDO_RELATE(A.GEOM, B.GEOM, 'mask=INSIDE') = 'TRUE';
+
+-- Zadanie 2 D
+SELECT B.CNTRY_NAME AS PANSTWO, 
+       SDO_GEOM.SDO_DISTANCE(A.GEOM, B.GEOM, 1, 'unit=km') AS ODL
+FROM COUNTRY_BOUNDARIES A, COUNTRY_BOUNDARIES B
+WHERE A.CNTRY_NAME = 'Poland' 
+AND B.CNTRY_NAME != 'Poland'
+AND NOT SDO_RELATE(A.GEOM, B.GEOM, 'mask=ANYINTERACT') = 'TRUE';
+
+-- Zadanie 3 A
+SELECT B.CNTRY_NAME, 
+       SDO_GEOM.SDO_LENGTH(SDO_GEOM.SDO_INTERSECTION(A.GEOM, B.GEOM, 1), 1, 'unit=km') AS ODLEGLOSC
+FROM COUNTRY_BOUNDARIES A, COUNTRY_BOUNDARIES B
+WHERE A.CNTRY_NAME = 'Poland' 
+AND B.CNTRY_NAME != 'Poland'
+AND SDO_RELATE(A.GEOM, B.GEOM, 'mask=TOUCH') = 'TRUE';
+
+-- Zadanie 3 B
+SELECT CNTRY_NAME
+FROM COUNTRY_BOUNDARIES
+ORDER BY SDO_GEOM.SDO_AREA(GEOM, 1, 'unit=SQ_KM') DESC
+FETCH FIRST 1 ROWS ONLY;
+
+-- Zadanie 3 C
+SELECT SDO_GEOM.SDO_AREA(SDO_AGGR_MBR(GEOM), 1, 'unit=SQ_KM') AS SQ_KM
+FROM MAJOR_CITIES
+WHERE CITY_NAME IN ('Warsaw', 'Lodz');
+
+-- Zadanie 3 D
+SELECT SDO_GEOM.SDO_UNION(A.GEOM, B.GEOM, 1).GET_GTYPE() AS GTYPE
+FROM COUNTRY_BOUNDARIES A, MAJOR_CITIES B
+WHERE A.CNTRY_NAME = 'Poland' AND B.CITY_NAME = 'Prague';
+
+-- Zadanie 3 E
+SELECT B.CITY_NAME, A.CNTRY_NAME
+FROM COUNTRY_BOUNDARIES A, MAJOR_CITIES B
+WHERE A.CNTRY_NAME = B.CNTRY_NAME
+ORDER BY SDO_GEOM.SDO_DISTANCE(B.GEOM, SDO_GEOM.SDO_CENTROID(A.GEOM, 1), 1, 'unit=km')
+FETCH FIRST 1 ROWS ONLY;
+
+-- Zadanie 3 F
+SELECT R.NAME, 
+       SUM(SDO_GEOM.SDO_LENGTH(SDO_GEOM.SDO_INTERSECTION(C.GEOM, R.GEOM, 1), 1, 'unit=km')) AS DLUGOSC
+FROM COUNTRY_BOUNDARIES C, RIVERS R
+WHERE C.CNTRY_NAME = 'Poland'
+AND SDO_RELATE(C.GEOM, R.GEOM, 'mask=ANYINTERACT') = 'TRUE'
+GROUP BY R.NAME;
+-- nie ma Warty :(
